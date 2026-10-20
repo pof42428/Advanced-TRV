@@ -24,7 +24,7 @@
 ################################################################################
 blueprint:
   name: Advanced TRV room controller
-  author: helryser
+  author: pof42428
   description: >
     Production-grade controller for a single room with a Thermostatic Radiator
     Valve that supports an **external temperature input** and a **temperature
