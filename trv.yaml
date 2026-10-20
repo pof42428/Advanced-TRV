@@ -1,0 +1,761 @@
+################################################################################
+# Advanced single-room TRV controller
+#
+# Control priority (highest first):
+# 0. Maintenance switch ON -> automation halted (root condition)
+# 1. Window / door open -> heating paused (TRV dropped to 5 °C)
+# 2. Laundry override active -> valve forced 100 % open
+# 3. Heating master switch OFF:
+#      - If Laundry switch is ON: non-laundry valves closed (5 °C)
+#      - If Laundry switch is OFF: all valves forced 100 % open (prevent sticking)
+# 4. Manual open switch ON -> valve forced 100 % open
+# 5. Auto mode ON -> schedule setpoint (or boiler boost if active)
+# 6. Auto mode OFF -> manual target (UI slider / physical knob)
+#
+# Regulation is done by the TRV itself: it receives the setpoint, the room
+# temperature (external temperature input) and its start threshold
+# (temperature accuracy, sent exactly as configured, e.g. -0.4). It
+# opens when room <= setpoint + accuracy and closes when the room reaches the
+# setpoint.
+#
+# "Forced 100 % open" = TRV setpoint at the "fully open" temperature AND the
+# external temperature input fed with an artificially cold reading, so the
+# TRV's internal regulation has no choice but to fully open the valve.
+################################################################################
+blueprint:
+  name: Advanced TRV room controller
+  author: helryser
+  description: >
+    Production-grade controller for a single room with a Thermostatic Radiator
+    Valve that supports an **external temperature input** and a **temperature
+    accuracy** (start threshold) setting, e.g. Sonoff TRVZB (firmware ≥ 1.3)
+    via Zigbee2MQTT.
+
+    **Features**
+
+    - The TRV regulates natively: it gets the setpoint, the room temperature
+    and its start threshold (temperature accuracy, sent as-is, e.g. −0.4). It opens when room ≤ setpoint + accuracy and closes when the room
+    reaches the setpoint.
+
+    - Schedule-driven *auto mode* and *manual mode* driven by a UI slider
+    **or** the physical knob, kept in sync both ways. Turning the knob (or
+    moving the slider) while in auto mode switches the room to manual mode.
+
+    - *Ignore physical rotation* – knob changes are reverted, and the TRV
+    child lock is kept in sync with this switch (bidirectionally).
+
+    - Global *master switch* (summer mode → idle open / active close), *maintenance
+    switch* (automation halted) and *laundry drying* override.
+
+    - Window / door sensors pause heating after a configurable delay.
+
+    - Hardware *keep-alive*: the external temperature is re-sent periodically
+    so the TRV never times out its remote sensor (`remote_source_offline`,
+    ~30 min hardware timeout).
+
+    All optional entities may be left empty – the related feature is then
+    simply skipped.
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    # --------------------------------------------------------------------------
+    room_entities:
+      name: Room entities
+      icon: mdi:radiator
+      description: Devices physically located in this room.
+      collapsed: false
+      input:
+        trv_climate:
+          name: Climate entity (TRV)
+          description: The thermostatic radiator valve to control.
+          selector:
+            entity:
+              filter:
+                - domain: climate
+        room_temp_sensor:
+          name: Room temperature sensor
+          description: Reference temperature of the room (fed to the TRV).
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+                  device_class: temperature
+        room_setpoint_sensor:
+          name: Room setpoint sensor (schedule)
+          description: >
+            Entity whose state is the scheduled target temperature for this
+            room (e.g. a template sensor driven by a schedule helper).
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+                - domain: input_number
+        trv_external_temp:
+          name: TRV external temperature input (optional)
+          description: >
+            Number entity of the TRV that accepts an external temperature
+            (e.g. `number.xxx_external_temperature_input`).
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: number
+        trv_temp_accuracy:
+          name: TRV temperature accuracy (optional)
+          description: >
+            Number entity of the TRV's start threshold
+            (e.g. `number.xxx_temperature_accuracy`). It is set to the
+            "Start heating offset" value exactly as configured.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: number
+        trv_child_lock:
+          name: TRV child lock switch (optional)
+          description: Kept in sync with the "Ignore physical rotation" switch.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: switch
+        window_sensors:
+          name: Window / door sensors (optional)
+          description: >
+            Heating is paused (TRV dropped to the window temperature) while any
+            of these is open for longer than the window delay.
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: binary_sensor
+                  device_class:
+                    - window
+                    - door
+                    - opening
+                - domain: group
+
+    # --------------------------------------------------------------------------
+    room_controls:
+      name: Room controls (helpers)
+      icon: mdi:tune-variant
+      description: Dashboard helpers that belong to this room only.
+      collapsed: true
+      input:
+        target_slider:
+          name: Target temperature UI slider (optional)
+          description: >
+            Manual target in manual mode; mirrors the schedule setpoint in auto
+            mode. Kept in sync with the physical knob.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: input_number
+        start_offset_entity:
+          name: Start heating offset entity (optional)
+          description: >
+            Input number helper to dynamically set the TRV start offset / accuracy from the UI.
+            If omitted, defaults to -0.4 °C.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: input_number
+        auto_mode_switch:
+          name: Auto mode switch (optional)
+          description: >
+            ON = follow the schedule setpoint, OFF = manual target. If omitted,
+            the room is permanently in auto mode.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+        manual_open_switch:
+          name: Manual open switch (optional)
+          description: Forces the radiator fully open while ON.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+        ignore_rotation_switch:
+          name: Ignore physical rotation switch (optional)
+          description: >
+            While ON, changes made on the TRV knob are reverted and the child
+            lock (if configured) is engaged.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+        laundry_override_enabled:
+          name: Laundry override switch (optional)
+          description: >
+            Optional input_boolean helper. Allow the global laundry drying switch
+            to force this room's radiator fully open if this switch is ON.
+            If omitted, defaults to false.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+        boiler_boost_switch:
+          name: Boiler boost feature switch (optional)
+          description: Enable/disable the boiler boost feature in auto mode.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+        boiler_state_switch:
+          name: Boiler state entity (optional)
+          description: Input boolean or binary sensor representing the boiler on/off state.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+                - domain: binary_sensor
+        boost_temp_difference:
+          name: Boost temperature difference entity (optional)
+          description: Input number entity containing the difference threshold value.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: input_number
+
+    # --------------------------------------------------------------------------
+    global_entities:
+      name: Global system entities
+      icon: mdi:home-thermometer
+      description: House-wide helpers shared by all rooms.
+      collapsed: true
+      input:
+        heating_master_switch:
+          name: Heating master switch (optional)
+          description: >
+            House heating toggle. OFF = Summer Mode.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+        heating_maintenance_switch:
+          name: Heating maintenance switch (optional)
+          description: While ON, this automation does nothing at all.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+        laundry_mode_switch:
+          name: Laundry drying mode switch (optional)
+          description: >
+            Global laundry drying toggle. Only affects rooms where the laundry
+            heating override is enabled.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+
+    # --------------------------------------------------------------------------
+    tuning:
+      name: Tuning & offsets
+      icon: mdi:knob
+      collapsed: true
+      input:
+        fully_open_temp:
+          name: Valve "fully open" temperature
+          description: TRV setpoint used to force the valve fully open.
+          default: 35
+          selector:
+            number:
+              min: 20
+              max: 40
+              step: 0.5
+              unit_of_measurement: °C
+              mode: box
+        fully_open_ext_temp:
+          name: Valve "fully open" external temperature
+          description: >
+            Artificially cold reading sent to the external temperature input
+            while the valve is forced open.
+          default: 15
+          selector:
+            number:
+              min: 0
+              max: 20
+              step: 0.5
+              unit_of_measurement: °C
+              mode: box
+        window_temp:
+          name: Window open temperature
+          description: TRV setpoint while a window / door is open or idle closed.
+          default: 5
+          selector:
+            number:
+              min: 4
+              max: 15
+              step: 0.5
+              unit_of_measurement: °C
+              mode: box
+        window_delay:
+          name: Window open delay
+          description: How long a window must stay open before heating pauses.
+          default:
+            seconds: 30
+          selector:
+            duration: {}
+        trigger_debounce:
+          name: Trigger debounce
+          description: >
+            Sensor / slider / knob values must be stable this long before the
+            automation reacts.
+          default:
+            seconds: 15
+          selector:
+            duration: {}
+        keep_alive_interval:
+          name: Keep-alive interval
+          description: >
+            How often the external temperature is re-sent regardless of
+            changes. Must stay below the TRV's 30 min remote sensor timeout.
+          default: 10
+          selector:
+            number:
+              min: 1
+              max: 29
+              step: 1
+              unit_of_measurement: min
+              mode: slider
+
+mode: queued
+max: 10
+max_exceeded: silent
+
+trigger_variables:
+  ka_interval: !input keep_alive_interval
+
+triggers:
+  # ---- Periodic / recovery triggers
+  - trigger: homeassistant
+    event: start
+    id: ha_start
+  - trigger: template
+    value_template: >-
+      {{ ((now().timestamp() | int) // 60) % ([ka_interval | int(10), 1] | max) == 0 }}
+    id: keep_alive
+  - trigger: state
+    entity_id: !input trv_climate
+    from: unavailable
+    not_to: [unavailable, unknown]
+    id: trv_recovered
+
+  # ---- Debounced value triggers
+  - trigger: state
+    entity_id: !input room_temp_sensor
+    not_to: [unavailable, unknown]
+    for: !input trigger_debounce
+    id: room_temp
+  - trigger: state
+    entity_id: !input room_setpoint_sensor
+    not_to: [unavailable, unknown]
+    for: !input trigger_debounce
+    id: setpoint
+  - trigger: state
+    entity_id: !input target_slider
+    not_to: [unavailable, unknown]
+    for: !input trigger_debounce
+    id: slider
+  - trigger: state
+    entity_id: !input start_offset_entity
+    not_to: [unavailable, unknown]
+    for: !input trigger_debounce
+    id: start_offset
+  - trigger: state
+    entity_id: !input trv_climate
+    attribute: temperature
+    for: !input trigger_debounce
+    id: trv_setpoint
+  - trigger: state
+    entity_id: !input trv_temp_accuracy
+    not_to: [unavailable, unknown]
+    for: !input trigger_debounce
+    id: accuracy
+
+  # ---- Mode / override switches
+  - trigger: state
+    entity_id: !input auto_mode_switch
+    not_to: [unavailable, unknown]
+    id: auto_switch
+  - trigger: state
+    entity_id: !input manual_open_switch
+    not_to: [unavailable, unknown]
+    id: manual_open
+  - trigger: state
+    entity_id: !input ignore_rotation_switch
+    not_to: [unavailable, unknown]
+    id: ignore_switch
+  - trigger: state
+    entity_id: !input trv_child_lock
+    not_to: [unavailable, unknown]
+    id: child_lock
+  - trigger: state
+    entity_id: !input heating_master_switch
+    not_to: [unavailable, unknown]
+    id: master
+  - trigger: state
+    entity_id: !input heating_maintenance_switch
+    to: "off"
+    id: maintenance_off
+  - trigger: state
+    entity_id: !input laundry_mode_switch
+    not_to: [unavailable, unknown]
+    id: laundry
+  - trigger: state
+    entity_id: !input laundry_override_enabled
+    not_to: [unavailable, unknown]
+    id: laundry_override
+
+  # ---- Windows / doors
+  - trigger: state
+    entity_id: !input window_sensors
+    to: "on"
+    for: !input window_delay
+    id: window_open
+  - trigger: state
+    entity_id: !input window_sensors
+    from: "on"
+    not_to: [unavailable, unknown]
+    id: window_closed
+
+  # ---- Boiler boost triggers
+  - trigger: state
+    entity_id: !input boiler_boost_switch
+    not_to: [unavailable, unknown]
+    id: boiler_boost
+  - trigger: state
+    entity_id: !input boiler_state_switch
+    not_to: [unavailable, unknown]
+    id: boiler_state
+  - trigger: state
+    entity_id: !input boost_temp_difference
+    not_to: [unavailable, unknown]
+    id: boost_diff
+
+# ------------------------------------------------------------------------------
+# Variables
+# ------------------------------------------------------------------------------
+variables:
+  # ---- Raw inputs ------------------------------------------------------------
+  trv: !input trv_climate
+  room_sensor: !input room_temp_sensor
+  setpoint_sensor: !input room_setpoint_sensor
+  ext_temp_number: !input trv_external_temp
+  accuracy_number: !input trv_temp_accuracy
+  child_lock_switch: !input trv_child_lock
+  window_input: !input window_sensors
+  target_slider: !input target_slider
+  start_offset_entity: !input start_offset_entity
+  auto_switch: !input auto_mode_switch
+  manual_open_switch: !input manual_open_switch
+  ignore_switch: !input ignore_rotation_switch
+  laundry_override_entity: !input laundry_override_enabled
+  master_switch: !input heating_master_switch
+  maintenance_switch: !input heating_maintenance_switch
+  laundry_switch: !input laundry_mode_switch
+  fully_open_temp: !input fully_open_temp
+  fully_open_ext_temp: !input fully_open_ext_temp
+  window_temp: !input window_temp
+  window_delay: !input window_delay
+
+  # ---- Boiler Boost helper inputs ------------------------------------------
+  boiler_boost_switch: !input boiler_boost_switch
+  boiler_state_switch: !input boiler_state_switch
+  boost_diff_number: !input boost_temp_difference
+
+  has_boiler_boost: "{{ boiler_boost_switch is string and boiler_boost_switch | length > 0 }}"
+  has_boiler_state: "{{ boiler_state_switch is string and boiler_state_switch | length > 0 }}"
+  has_boost_diff: "{{ boost_diff_number is string and boost_diff_number | length > 0 }}"
+
+  boiler_boost_on: "{{ has_boiler_boost and is_state(boiler_boost_switch, 'on') }}"
+  boiler_on: "{{ has_boiler_state and is_state(boiler_state_switch, 'on') }}"
+  boost_diff_val: "{{ states(boost_diff_number) | float(none) if has_boost_diff else none }}"
+
+  # ---- Trigger context -------------------------------------------------------
+  trigger_id: "{{ trigger.id | default('manual') if trigger is defined else 'manual' }}"
+  is_periodic: "{{ trigger_id in ['ha_start', 'keep_alive', 'trv_recovered', 'manual'] }}"
+
+  # ---- Which optional entities are configured --------------------------------
+  has_ext: "{{ ext_temp_number is string and ext_temp_number | length > 0 }}"
+  has_accuracy: "{{ accuracy_number is string and accuracy_number | length > 0 }}"
+  has_child_lock: "{{ child_lock_switch is string and child_lock_switch | length > 0 }}"
+  has_slider: "{{ target_slider is string and target_slider | length > 0 }}"
+  has_offset_entity: "{{ start_offset_entity is string and start_offset_entity | length > 0 }}"
+  has_auto: "{{ auto_switch is string and auto_switch | length > 0 }}"
+  has_manual_open: "{{ manual_open_switch is string and manual_open_switch | length > 0 }}"
+  has_ignore: "{{ ignore_switch is string and ignore_switch | length > 0 }}"
+  has_master: "{{ master_switch is string and master_switch | length > 0 }}"
+  has_maintenance: "{{ maintenance_switch is string and maintenance_switch | length > 0 }}"
+  has_laundry: "{{ laundry_switch is string and laundry_switch | length > 0 }}"
+  has_laundry_override: "{{ laundry_override_entity is string and laundry_override_entity | length > 0 }}"
+  windows: >-
+    {{ ([window_input] if window_input is string else window_input | list)
+       | select('string') | reject('eq', '') | list }}
+
+  # ---- Switch states ---------------------------------------------------------
+  maintenance_on: "{{ has_maintenance and is_state(maintenance_switch, 'on') }}"
+  master_on: "{{ not has_master or not is_state(master_switch, 'off') }}"
+  auto_on: "{{ not has_auto or is_state(auto_switch, 'on') }}"
+  manual_open_on: "{{ has_manual_open and is_state(manual_open_switch, 'on') }}"
+  ignore_on: "{{ has_ignore and is_state(ignore_switch, 'on') }}"
+  global_laundry_on: "{{ has_laundry and is_state(laundry_switch, 'on') }}"
+  laundry_override_is_on: "{{ has_laundry_override and is_state(laundry_override_entity, 'on') }}"
+  laundry_on: "{{ laundry_override_is_on and global_laundry_on }}"
+  child_lock_state: "{{ states(child_lock_switch) if has_child_lock else 'unknown' }}"
+  window_delay_s: >-
+    {%- set d = window_delay -%}
+    {%- if d is mapping -%}
+      {{ (d.days | default(0)) * 86400 + (d.hours | default(0)) * 3600
+         + (d.minutes | default(0)) * 60 + (d.seconds | default(0)) }}
+    {%- else -%}0{%- endif -%}
+  window_open: >-
+    {%- set ns = namespace(open=false) -%}
+    {%- for s in expand(windows) | selectattr('state', 'eq', 'on') -%}
+      {%- if (now() - s.last_changed).total_seconds() >= window_delay_s - 1 -%}
+        {%- set ns.open = true -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {{ ns.open }}
+
+  # ---- Measurements ----------------------------------------------------------
+  room_temp: "{{ states(room_sensor) | float(none) }}"
+  schedule_sp: "{{ states(setpoint_sensor) | float(none) }}"
+  slider_val: "{{ states(target_slider) | float(none) if has_slider else none }}"
+  slider_min: "{{ state_attr(target_slider, 'min') | float(0) if has_slider else 0 }}"
+  slider_max: "{{ state_attr(target_slider, 'max') | float(100) if has_slider else 100 }}"
+  ext_current: "{{ states(ext_temp_number) | float(none) if has_ext else none }}"
+  accuracy_current: "{{ states(accuracy_number) | float(none) if has_accuracy else none }}"
+  trv_state: "{{ states(trv) }}"
+  trv_target: "{{ state_attr(trv, 'temperature') | float(none) }}"
+  trv_min: "{{ state_attr(trv, 'min_temp') | float(5) }}"
+  trv_max: "{{ state_attr(trv, 'max_temp') | float(35) }}"
+  trv_step: "{{ [state_attr(trv, 'target_temp_step') | float(0.5), 0.1] | max }}"
+
+  # ---- Control mode (priority order) -----------------------------------------
+  control_mode: >-
+    {%- if window_open -%}window
+    {%- elif laundry_on -%}laundry
+    {%- elif not master_on -%}
+      {%- if global_laundry_on -%}summer_closed
+      {%- else -%}summer_open
+      {%- endif -%}
+    {%- elif manual_open_on -%}manual_open
+    {%- elif auto_on -%}auto
+    {%- else -%}manual
+    {%- endif -%}
+
+  # ---- Desired temperature accuracy: forced negative, clamped -1.0 to -0.2 ---
+  desired_accuracy: >-
+    {%- set raw_val = states(start_offset_entity) | float(-0.4) if has_offset_entity else -0.4 -%}
+    {%- set forced_neg = -(raw_val | abs) -%}
+    {%- set v = [[forced_neg, -1.0] | max, -0.2] | min -%}
+    {%- set mn = state_attr(accuracy_number, 'min') | float(none) if has_accuracy else none -%}
+    {%- set mx = state_attr(accuracy_number, 'max') | float(none) if has_accuracy else none -%}
+    {%- if mn is number -%}{%- set v = [v, mn] | max -%}{%- endif -%}
+    {%- if mx is number -%}{%- set v = [v, mx] | min -%}{%- endif -%}
+    {{ v | round(1) }}
+
+  # ---- Boiler Boost active check with hysteresis ---------------------------
+  was_boosting: >-
+    {{ trv_target is number and (trv_target - fully_open_temp) | abs < 0.5 }}
+
+  boiler_boost_active: >-
+    {%- if boiler_boost_on and boiler_on
+           and schedule_sp is number and room_temp is number and boost_diff_val is number -%}
+      {%- set start_thresh = schedule_sp + desired_accuracy + boost_diff_val -%}
+      {%- set stop_thresh = schedule_sp -%}
+      {{ (room_temp < stop_thresh) if was_boosting else (room_temp <= start_thresh) }}
+    {%- else -%}
+      {{ false }}
+    {%- endif -%}
+
+  # ---- Desired TRV setpoint --------------------------------------------------
+  desired_target: >-
+    {%- if control_mode in ['manual_open', 'laundry', 'summer_open'] -%}
+      {%- set t = fully_open_temp -%}
+    {%- elif control_mode in ['summer_closed', 'window'] -%}
+      {%- set t = window_temp -%}
+    {%- elif control_mode == 'auto' -%}
+      {%- if boiler_boost_active | bool(false) -%}
+        {%- set t = fully_open_temp -%}
+      {%- elif schedule_sp is number -%}
+        {%- set t = schedule_sp -%}
+      {%- else -%}
+        {%- set t = slider_val -%}
+      {%- endif -%}
+    {%- elif slider_val is number -%}
+      {%- set t = slider_val -%}
+    {%- else -%}
+      {%- set t = trv_target -%}
+    {%- endif -%}
+    {%- if t is number -%}
+      {{ ([[((t / trv_step) | round(1)) * trv_step, trv_min] | max, trv_max] | min) | round(1) }}
+    {%- else -%}
+      {{ none }}
+    {%- endif -%}
+
+  # ---- Desired external temperature ------------------------------------------
+  desired_ext: >-
+    {%- set v = fully_open_ext_temp if (control_mode in ['manual_open', 'laundry', 'summer_open'] or (control_mode == 'auto' and boiler_boost_active | bool(false))) else room_temp -%}
+    {{ v | round(1) if v is number else none }}
+
+  # ---- Slider value mirroring ------------------------------------------------
+  slider_sync_value: >-
+    {%- if schedule_sp is number -%}
+      {{ ([[schedule_sp, slider_min] | max, slider_max] | min) | round(1) }}
+    {%- else -%}
+      {{ none }}
+    {%- endif -%}
+
+  # ---- User interaction detection --------------------------------------------
+  rotation_detected: >-
+    {{ trigger_id == 'trv_setpoint'
+       and trigger.to_state.context.parent_id is none
+       and trv_target is number and desired_target is number
+       and (trv_target - desired_target) | abs > 0.01 }}
+  slider_takeover: >-
+    {{ trigger_id == 'slider' and control_mode == 'auto' and has_auto
+       and trigger.to_state.context.parent_id is none
+       and slider_val is number and slider_sync_value is number
+       and (slider_val - slider_sync_value) | abs >= 0.05 }}
+
+# ------------------------------------------------------------------------------
+# Root conditions
+# ------------------------------------------------------------------------------
+conditions:
+  - "{{ not maintenance_on }}"
+  - "{{ trv_state not in ['unavailable', 'unknown'] }}"
+
+# ------------------------------------------------------------------------------
+# Actions
+# ------------------------------------------------------------------------------
+actions:
+  # 1) Child lock <-> "Ignore physical rotation" synchronisation
+  - choose:
+      - conditions:
+          - "{{ trigger_id == 'child_lock' and has_ignore and has_child_lock }}"
+          - "{{ child_lock_state in ['on', 'off'] }}"
+          - "{{ child_lock_state != states(ignore_switch) }}"
+        sequence:
+          - action: "input_boolean.turn_{{ child_lock_state }}"
+            target:
+              entity_id: "{{ ignore_switch }}"
+      - conditions:
+          - "{{ has_ignore and has_child_lock }}"
+          - "{{ child_lock_state in ['on', 'off'] }}"
+          - "{{ (ignore_on and child_lock_state == 'off') or (not ignore_on and child_lock_state == 'on') }}"
+        sequence:
+          - action: "switch.turn_{{ 'on' if ignore_on else 'off' }}"
+            target:
+              entity_id: "{{ child_lock_switch }}"
+            continue_on_error: true
+
+  # 2) User take-over handling
+  - choose:
+      - conditions:
+          - "{{ rotation_detected and not ignore_on }}"
+          - "{{ control_mode == 'manual' or (control_mode == 'auto' and has_auto) }}"
+        sequence:
+          - if: "{{ has_slider }}"
+            then:
+              - action: input_number.set_value
+                target:
+                  entity_id: "{{ target_slider }}"
+                data:
+                  value: "{{ ([[trv_target, slider_min] | max, slider_max] | min) | round(1) }}"
+          - if: "{{ control_mode == 'auto' }}"
+            then:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: "{{ auto_switch }}"
+          - stop: Physical TRV rotation adopted as manual target
+
+      - conditions:
+          - "{{ slider_takeover }}"
+        sequence:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: "{{ auto_switch }}"
+          - stop: Slider change switched the room to manual mode
+
+  # 3) Make sure TRV is in heat mode
+  - if:
+      - "{{ trv_state != 'heat' }}"
+      - "{{ 'heat' in (state_attr(trv, 'hvac_modes') or []) }}"
+    then:
+      - action: climate.set_hvac_mode
+        target:
+          entity_id: "{{ trv }}"
+        data:
+          hvac_mode: heat
+        continue_on_error: true
+
+  # 4) Temperature accuracy setpoint
+  - if:
+      - "{{ has_accuracy }}"
+      - >-
+        {{ accuracy_current is not number
+           or (accuracy_current - desired_accuracy) | abs >= 0.05 }}
+    then:
+      - action: number.set_value
+        target:
+          entity_id: "{{ accuracy_number }}"
+        data:
+          value: "{{ desired_accuracy }}"
+        continue_on_error: true
+
+  # 5) External temperature
+  - if:
+      - "{{ has_ext and desired_ext is number }}"
+      - >-
+        {{ is_periodic or ext_current is not number
+           or (ext_current - desired_ext) | abs >= 0.05 }}
+    then:
+      - action: number.set_value
+        target:
+          entity_id: "{{ ext_temp_number }}"
+        data:
+          value: "{{ desired_ext }}"
+        continue_on_error: true
+
+  # 6) TRV setpoint
+  - if:
+      - "{{ desired_target is number }}"
+      - >-
+        {{ trv_target is not number
+           or (trv_target - desired_target) | abs > 0.01 }}
+    then:
+      - action: climate.set_temperature
+        target:
+          entity_id: "{{ trv }}"
+        data:
+          temperature: "{{ desired_target }}"
+        continue_on_error: true
+
+  # 7) Auto mode: mirror schedule setpoint on UI slider
+  - if:
+      - "{{ control_mode == 'auto' and has_slider and slider_sync_value is number }}"
+      - "{{ slider_val is not number or (slider_val - slider_sync_value) | abs >= 0.01 }}"
+    then:
+      - action: input_number.set_value
+        target:
+          entity_id: "{{ target_slider }}"
+        data:
+          value: "{{ slider_sync_value }}"
