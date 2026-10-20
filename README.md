@@ -2,45 +2,45 @@
 
 [![Home Assistant Required Version](https://img.shields.io/badge/Home%20Assistant-2024.10.0%2B-blue.svg)](https://homeassistant.io)
 
-A production-grade, highly sophisticated automation blueprint for a single room equipped with a Thermostatic Radiator Valve (TRV) that supports an **external temperature input** and a **temperature accuracy** (start threshold) setting—such as the **Sonoff TRVZB** (firmware ≥ 1.3) managed via Zigbee2MQTT[cite: 1].
+A production-grade, highly sophisticated automation blueprint for a single room equipped with a Thermostatic Radiator Valve (TRV) that supports an **external temperature input** and a **temperature accuracy** (start threshold) setting—such as the **Sonoff TRVZB** (firmware ≥ 1.3) managed via Zigbee2MQTT.
 
 ---
 
 ## ✨ Features
 
-- **Native TRV Regulation:** The TRV regulates temperature natively by receiving the target setpoint, the external room temperature sensor reading, and its start threshold (accuracy, sent as-is, e.g., `−0.4` °C)[cite: 1]. It opens when `room ≤ setpoint + accuracy` and closes when the room reaches the target setpoint[cite: 1].
-- **Seamless Auto & Manual Sync:** Schedule-driven *auto mode* and *manual mode* driven by a UI slider or the physical knob, kept fully in sync both ways[cite: 1]. Turning the knob or moving the slider while in auto mode automatically switches the room to manual mode[cite: 1].
-- **Ignore Physical Rotation:** Child-lock synchronization and knob-change reversion capabilities to prevent unwanted manual physical adjustments[cite: 1].
+- **Native TRV Regulation:** The TRV regulates temperature natively by receiving the target setpoint, the external room temperature sensor reading, and its start threshold (accuracy, sent as-is, e.g., `−0.4` °C). It opens when `room ≤ setpoint + accuracy` and closes when the room reaches the target setpoint.
+- **Seamless Auto & Manual Sync:** Schedule-driven *auto mode* and *manual mode* driven by a UI slider or the physical knob, kept fully in sync both ways. Turning the knob or moving the slider while in auto mode automatically switches the room to manual mode.
+- **Ignore Physical Rotation:** Child-lock synchronization and knob-change reversion capabilities to prevent unwanted manual physical adjustments.
 - **Global & Room Overrides:**
-  - Global *master switch* (summer mode handling)[cite: 1].
-  - *Maintenance switch* to safely halt the automation[cite: 1].
-  - *Laundry drying mode* overrides to force valves fully open[cite: 1].
-- **Window/Door Integration:** Pauses heating automatically after a configurable delay when windows or doors are left open[cite: 1].
-- **Hardware Keep-Alive:** Automatically re-sends the external temperature periodically to prevent the TRV from timing out its remote sensor (~30 min hardware timeout prevention)[cite: 1].
-- **Boiler Boost Integration:** Optional automated boiler boost features based on room temperature differences[cite: 1].
+  - Global *master switch* (summer mode handling).
+  - *Maintenance switch* to safely halt the automation.
+  - *Laundry drying mode* overrides to force valves fully open.
+- **Window/Door Integration:** Pauses heating automatically after a configurable delay when windows or doors are left open.
+- **Hardware Keep-Alive:** Automatically re-sends the external temperature periodically to prevent the TRV from timing out its remote sensor (~30 min hardware timeout prevention).
+- **Boiler Boost Integration:** Optional automated boiler boost features based on room temperature differences.
 
 ---
 
 ## 🚦 Control Priority Order
 
 The controller evaluates states based on the following priority hierarchy (highest to lowest):
-0. **Maintenance switch ON** → Automation is completely halted[cite: 1].
-1. **Window / Door open** → Heating paused, TRV dropped to the minimum window temperature[cite: 1].
-2. **Laundry override active** → Valve forced 100% open[cite: 1].
+0. **Maintenance switch ON** → Automation is completely halted.
+1. **Window / Door open** → Heating paused, TRV dropped to the minimum window temperature.
+2. **Laundry override active** → Valve forced 100% open.
 3. **Heating master switch OFF (Summer Mode):**
-   - If global laundry switch is ON: Non-laundry valves close (`5 °C`)[cite: 1].
-   - If global laundry switch is OFF: All valves forced 100% open (prevents valve sticking)[cite: 1].
-4. **Manual open switch ON** → Valve forced 100% open[cite: 1].
-5. **Auto mode ON** → Follows the schedule setpoint (or boiler boost if active)[cite: 1].
-6. **Auto mode OFF** → Follows the manual target (UI slider or physical knob)[cite: 1].
+   - If global laundry switch is ON: Non-laundry valves close (`5 °C`).
+   - If global laundry switch is OFF: All valves forced 100% open (prevents valve sticking).
+4. **Manual open switch ON** → Valve forced 100% open.
+5. **Auto mode ON** → Follows the schedule setpoint (or boiler boost if active).
+6. **Auto mode OFF** → Follows the manual target (UI slider or physical knob).
 
 ---
 
 ## 📦 Requirements & Prerequisites
 
-- **Home Assistant:** Version `2024.10.0` or newer[cite: 1].
-- **Integration:** Zigbee2MQTT (recommended for Sonoff TRVZB or equivalent TRVs supporting external temperature and start accuracy attributes/number entities)[cite: 1].
-- **Optional Helpers:** Input numbers, input booleans, and binary sensors can be configured depending on which features you want to utilize. All optional inputs can be left empty to skip functionality[cite: 1].
+- **Home Assistant:** Version `2024.10.0` or newer.
+- **Integration:** Zigbee2MQTT (recommended for Sonoff TRVZB or equivalent TRVs supporting external temperature and start accuracy attributes/number entities).
+- **Optional Helpers:** Input numbers, input booleans, and binary sensors can be configured depending on which features you want to utilize. All optional inputs can be left empty to skip functionality.
 
 ---
 
@@ -61,18 +61,18 @@ You can import this blueprint directly into your Home Assistant instance using t
 ## ⚙️ Inputs Configuration Overview
 
 ### 1. Room Entities
-- **Climate entity (TRV):** The physical radiator climate device[cite: 1].
-- **Room temperature sensor:** Reference temperature sensor fed to the TRV[cite: 1].
-- *Optional:* External temperature number entity, temperature accuracy number entity, child lock switch, and window/door binary sensors[cite: 1].
+- **Climate entity (TRV):** The physical radiator climate device.
+- **Room temperature sensor:** Reference temperature sensor fed to the TRV.
+- *Optional:* External temperature number entity, temperature accuracy number entity, child lock switch, and window/door binary sensors.
 
 ### 2. Room Controls (Helpers)
-- *Optional:* Target temperature UI slider (`input_number`), start offset entity, auto mode switch, manual open switch, ignore physical rotation switch, laundry override boolean, and boiler boost configuration entities[cite: 1].
+- *Optional:* Target temperature UI slider (`input_number`), start offset entity, auto mode switch, manual open switch, ignore physical rotation switch, laundry override boolean, and boiler boost configuration entities.
 
 ### 3. Global System Entities
-- *Optional:* House-wide heating master switch, maintenance switch, and laundry drying mode switch[cite: 1].
+- *Optional:* House-wide heating master switch, maintenance switch, and laundry drying mode switch.
 
 ### 4. Tuning & Offsets
-- Adjust parameters like the valve "fully open" temperature, artificial cold external temperature for forced opening, window temperature fallback, window open delay, trigger debounce duration, and the hardware keep-alive interval[cite: 1].
+- Adjust parameters like the valve "fully open" temperature, artificial cold external temperature for forced opening, window temperature fallback, window open delay, trigger debounce duration, and the hardware keep-alive interval.
 
 ---
 
