@@ -46,15 +46,15 @@ The controller evaluates states based on the following priority hierarchy (highe
 
 ## 🚀 Installation
 
-You can import this blueprint directly into your Home Assistant instance using the button below (once hosted on GitHub):
+You can import this blueprint directly into your Home Assistant instance using the button below:
 
-[![Open your Home Assistant instance and show the blueprint import dialog](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=YOUR_GITHUB_RAW_URL_HERE/trv.yaml)
+[![Open your Home Assistant instance and show the blueprint import dialog](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=[YOUR_GITHUB_RAW_URL_HERE/trv.yaml](https://github.com/pof42428/Advanced-TRV/blob/main/trv.yaml))
 
 ### Manual Installation
 1. Copy the raw contents of `trv.yaml`.
 2. Save the file inside your Home Assistant configuration directory under:
-   `config/blueprints/automation/helryser/trv.yaml`
-3. Go to **Settings > Automations & Scenes > Blueprints** and click **Reload Blueprints**.
+   `config/blueprints/automation/pof42428/trv.yaml`
+3. Go to **Settings > Tools > YAML configuration reloading** and click **Automations**.
 
 ---
 
