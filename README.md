@@ -1,7 +1,6 @@
 # 🌡️ Advanced TRV Room Controller for Home Assistant
 
-[![Home Assistant Required Version](https://img.shields.io/badge/Home%20Assistant-2024.10.0%2B-blue.svg)](https://homeassistant.io)
-[![Author](https://img.shields.io/badge/Author-pof42428-orange.svg)]()
+[![Home Assistant Required Version](https://img.shields.io/badge/Home%20Assistant-2024.10.0%2B-blue.svg)](https://homeassistant.io)()
 
 A production-grade, highly sophisticated automation blueprint for a single room equipped with a Thermostatic Radiator Valve (TRV) that supports an **external temperature input** and a **temperature accuracy** (start threshold) setting—such as the **Sonoff TRVZB** (firmware ≥ 1.3) managed via Zigbee2MQTT[cite: 1].
 
