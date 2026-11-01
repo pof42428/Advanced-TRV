@@ -7,7 +7,8 @@
 # 2. Laundry override active -> valve set to schedule + laundry offset
 # 3. Heating master switch OFF:
 #      - If Laundry switch is ON: non-laundry valves closed (5 °C)
-#      - If Laundry switch is OFF: all valves forced 100 % open (prevent sticking)
+#      - If Laundry switch is OFF: standard state forced 100 % open (prevent sticking)
+#        * Saturday at 10:00 AM exercise sequence: 3x (close 1 min -> open 1 min) -> remain open
 # 4. Manual open switch ON -> valve forced 100 % open
 # 5. Auto mode ON -> schedule setpoint (or boiler boost if active)
 # 6. Auto mode OFF -> manual target (UI slider / physical knob)
@@ -44,7 +45,7 @@ blueprint:
     - *Ignore physical rotation* – knob changes are reverted, and the TRV
     child lock is kept in sync with this switch (bidirectionally).
 
-    - Global *master switch* (summer mode → idle open / active close), *maintenance
+    - Global *master switch* (summer mode → idle open / active close with Saturday 10:00 AM anti-sticking maintenance exercise), *maintenance
     switch* (automation halted) and *laundry drying* override with custom offset.
 
     - Window / door sensors pause heating after a configurable delay.
@@ -366,6 +367,9 @@ triggers:
     from: unavailable
     not_to: [unavailable, unknown]
     id: trv_recovered
+  - trigger: time
+    at: "10:00:00"
+    id: summer_exercise
 
   # ---- Debounced value triggers
   - trigger: state
@@ -668,7 +672,50 @@ conditions:
 # Actions
 # ------------------------------------------------------------------------------
 actions:
-  # 1) Child lock <-> "Ignore physical rotation" synchronisation
+  # 1) Saturday 10:00 AM Summer Mode anti-sticking maintenance exercise
+  - if:
+      - "{{ trigger_id == 'summer_exercise' }}"
+      - "{{ now().weekday() == 5 }}"
+      - "{{ not master_on }}"
+      - "{{ not global_laundry_on }}"
+    then:
+      - repeat:
+          count: 3
+          sequence:
+            # Step 1: Force Close
+            - action: climate.set_temperature
+              target:
+                entity_id: "{{ trv }}"
+              data:
+                temperature: "{{ window_temp }}"
+            - if: "{{ has_ext and room_temp is number }}"
+              then:
+                - action: number.set_value
+                  target:
+                    entity_id: "{{ ext_temp_number }}"
+                  data:
+                    value: "{{ room_temp }}"
+            - delay:
+                minutes: 1
+
+            # Step 2: Force Open
+            - action: climate.set_temperature
+              target:
+                entity_id: "{{ trv }}"
+              data:
+                temperature: "{{ fully_open_temp }}"
+            - if: "{{ has_ext }}"
+              then:
+                - action: number.set_value
+                  target:
+                    entity_id: "{{ ext_temp_number }}"
+                  data:
+                    value: "{{ fully_open_ext_temp }}"
+            - delay:
+                minutes: 1
+      - stop: Completed Saturday summer valve anti-sticking exercise routine
+
+  # 2) Child lock <-> "Ignore physical rotation" synchronisation
   - choose:
       - conditions:
           - "{{ trigger_id == 'child_lock' and has_ignore and has_child_lock }}"
@@ -688,7 +735,7 @@ actions:
               entity_id: "{{ child_lock_switch }}"
             continue_on_error: true
 
-  # 2) User take-over handling
+  # 3) User take-over handling
   - choose:
       - conditions:
           - "{{ rotation_detected and not ignore_on }}"
@@ -716,7 +763,7 @@ actions:
               entity_id: "{{ auto_switch }}"
           - stop: Slider change switched the room to manual mode
 
-  # 3) Make sure TRV is in heat mode
+  # 4) Make sure TRV is in heat mode
   - if:
       - "{{ trv_state != 'heat' }}"
       - "{{ 'heat' in (state_attr(trv, 'hvac_modes') or []) }}"
@@ -728,7 +775,7 @@ actions:
           hvac_mode: heat
         continue_on_error: true
 
-  # 4) Temperature accuracy setpoint
+  # 5) Temperature accuracy setpoint
   - if:
       - "{{ has_accuracy }}"
       - >-
@@ -742,7 +789,7 @@ actions:
           value: "{{ desired_accuracy }}"
         continue_on_error: true
 
-  # 5) External temperature
+  # 6) External temperature
   - if:
       - "{{ has_ext and desired_ext is number }}"
       - >-
@@ -756,7 +803,7 @@ actions:
           value: "{{ desired_ext }}"
         continue_on_error: true
 
-  # 6) TRV setpoint
+  # 7) TRV setpoint
   - if:
       - "{{ desired_target is number }}"
       - >-
@@ -770,7 +817,7 @@ actions:
           temperature: "{{ desired_target }}"
         continue_on_error: true
 
-  # 7) Auto mode: mirror schedule setpoint on UI slider
+  # 8) Auto mode: mirror schedule setpoint on UI slider
   - if:
       - "{{ control_mode == 'auto' and has_slider and slider_sync_value is number }}"
       - "{{ slider_val is not number or (slider_val - slider_sync_value) | abs >= 0.01 }}"
