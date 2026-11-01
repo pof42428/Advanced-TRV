@@ -1,93 +1,134 @@
-# Advanced Single-Room TRV Controller (Home Assistant Blueprint)
+# 🌡️ Advanced TRV Room Controller for Home Assistant
 
-[![Home Assistant Blueprint](https://img.shields.io/badge/Home%20Assistant-Blueprint-blue?logo=homeassistant&style=flat-square)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fpof42428%2FAdvanced-TRV%2Fblob%2Fmain%2Ftrv.yaml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
+[![Home Assistant Required Version](https://img.shields.io/badge/Home%20Assistant-2024.10.0%2B-blue.svg)](https://homeassistant.io)
+[![Author](https://img.shields.io/badge/Author-helryser-orange.svg)]()
 
-A production-grade, highly reliable **Home Assistant** blueprint for controlling a single room's Thermostatic Radiator Valve (TRV) using native temperature regulation, schedule setpoints, physical knob synchronization, window sensor pauses, boiler boost features, and global override modes.
-
-Specifically optimized for TRVs that support an **external temperature input** and a **temperature accuracy (start offset)** setting (such as the *Sonoff TRVZB* running firmware ≥ 1.3 via Zigbee2MQTT).
+A production-grade, highly sophisticated automation blueprint for a single room equipped with a Thermostatic Radiator Valve (TRV) that supports an **external temperature input** and a **temperature accuracy** (start threshold) setting—such as the **Sonoff TRVZB** (firmware ≥ 1.3) managed via Zigbee2MQTT.
 
 ---
 
-## 🚀 Quick Setup
+## ✨ Features
 
-Import this blueprint directly into your Home Assistant instance:
-
-[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fpof42428%2FAdvanced-TRV%2Fblob%2Fmain%2Ftrv.yaml)
-
----
-
-## ⚡ Features
-
-- **🌡️ Native TRV Regulation:** Pushes the target setpoint, room temperature, and accuracy threshold (`-1.0 °C` to `-0.2 °C`) directly to the TRV so internal firmware regulates heat without automation jitter.
-- **🔄 Bidirectional Sync:** Physical TRV knob adjustments and dashboard UI sliders reflect each other in real-time. Manual rotation automatically switches the room from auto to manual mode unless locked.
-- **🔒 Child Lock & Physical Lockout:** Syncs `trv_child_lock` bidirectionally with an `ignore_rotation_switch` helper to ignore unwanted manual knob adjustments.
-- **🪟 Window & Door Pause:** Automatically drops target setpoint to `5 °C` (configurable) when open windows or doors are detected beyond the set debounce delay.
-- **🧺 Laundry Drying Mode:** Boosts room temperature via `offset_laundry` (or forces full heat) when local and global laundry drying toggles are ON, while continuing to feed real-time room temperature to allow native modulation.
-- **🔥 Boiler Boost Support:** Forces TRV open when central heating boiler turns ON and room temperature drops below the configured boost threshold.
-- **📡 External Sensor Keep-Alive:** Periodically re-sends external temperature values to prevent hardware offline timeouts (`remote_source_offline`, ~30 min).
+- **Native TRV Regulation:** The TRV regulates temperature natively by receiving the target setpoint, the external room temperature sensor reading, and its start threshold (accuracy, sent as-is, e.g., `−0.4` °C). It opens when `room <= setpoint + accuracy` and closes when the room reaches the target setpoint.
+- **Seamless Auto & Manual Sync:** Schedule-driven *auto mode* and *manual mode* driven by a UI slider or the physical knob, kept fully in sync both ways. Turning the knob or moving the slider while in auto mode automatically switches the room to manual mode.
+- **Ignore Physical Rotation:** Child-lock synchronization and knob-change reversion capabilities to prevent unwanted manual physical adjustments.
+- **Global & Room Overrides:**
+  - Global *master switch* (summer mode handling).
+  - *Maintenance switch* to safely halt the automation.
+  - *Laundry drying mode* override with customizable target temperature offset (`offset_laundry`).
+- **Window/Door Integration:** Pauses heating automatically after a configurable delay when windows or doors are left open.
+- **Hardware Keep-Alive:** Automatically re-sends the external temperature periodically to prevent the TRV from timing out its remote sensor (~30 min hardware timeout prevention).
+- **Boiler Boost Integration:** Optional automated boiler boost features based on room temperature differences.
 
 ---
 
-## 🎛️ Control Priority Order
+## 🚦 Control Priority Order
 
-The controller evaluates actions in strict priority order (highest priority first):
+The controller evaluates states based on the following priority hierarchy (highest to lowest):
 
-| Priority | Condition | Resulting TRV Action |
-|---|---|---|
-| **0. Root** | Maintenance switch `ON` | Automation halted completely. |
-| **1. Pause** | Window / Door open | Heating paused; TRV set to `window_temp` (`5 °C`). |
-| **2. Override** | Laundry override active | TRV target set to `Room setpoint + offset_laundry` (default `+1 °C`). Real room temperature sent to external sensor input. |
-| **3. Master** | Master heating switch `OFF` | **Summer mode:** If global laundry switch is `ON`, non-laundry valves close (`5 °C`). Otherwise, valves stay forced 100 % open to prevent valve sticking. |
-| **4. Force** | Manual open switch `ON` | Valve forced 100 % open (`fully_open_temp` setpoint + artificial cold external temp feed). |
-| **5. Auto** | Auto mode switch `ON` | Follows scheduled room setpoint (or boiler boost setpoint if active). |
-| **6. Manual** | Auto mode switch `OFF` | Follows manual UI target slider or physical knob rotation. |
-
----
-
-## 🧺 How Laundry Drying Mode Works
-
-When both the **Local Laundry Override Switch** (`laundry_override_enabled`) and the **Global Laundry Drying Mode Switch** (`laundry_mode_switch`) are turned `ON`:
-
-1. **Target Temperature Calculation:**
-   The TRV target setpoint is set to:
-   $$\text{TRV Target} = \text{Room Setpoint Sensor} + \text{Laundry Offset}$$
-   *(If `offset_laundry` is omitted, it defaults to `+1.0 °C`).*
-
-2. **Real-Time Temperature Feedback:**
-   The actual room temperature reading (`room_temp_sensor`) is continuously pushed to the TRV's external temperature input (`trv_external_temp`).
-
-3. **Native Modulation:**
-   Instead of forcing the valve open unconditionally, the TRV natively modulates its valve state—heating aggressively while the room is cool and closing down as the room reaches the elevated laundry target.
+0. **Maintenance switch ON** → Automation is completely halted.
+1. **Window / Door open** → Heating paused, TRV dropped to the minimum window temperature.
+2. **Laundry override active** → TRV target set to schedule setpoint + `offset_laundry` (defaults to +1.0 °C) & real room temperature passed to external input.
+3. **Heating master switch OFF (Summer Mode):**
+   - If global laundry switch is ON: Non-laundry valves close (`5 °C`).
+   - If global laundry switch is OFF: All valves forced 100% open (prevents valve sticking).
+4. **Manual open switch ON** → Valve forced 100% open.
+5. **Auto mode ON** → Follows the schedule setpoint (or boiler boost if active).
+6. **Auto mode OFF** → Follows the manual target (UI slider or physical knob).
 
 ---
 
-## 📦 Blueprint Entities Overview
+## 🔍 Detailed Operational Scenarios
 
-### Required Inputs
-- **Climate entity (TRV):** Main `climate` entity of your thermostatic valve.
-- **Room temperature sensor:** External room thermometer (`sensor` with `device_class: temperature`).
-- **Room setpoint sensor:** Schedule target temperature helper (`sensor` or `input_number`).
+### Priority 0: Maintenance Switch ON (Root Condition)
+- **Trigger:** The `heating_maintenance_switch` is turned **ON**.
+- **Behavior:** The automation is completely halted at the root condition level. No actions are executed, and the TRV state is left untouched, allowing manual maintenance or physical work on the radiator without the automation fighting back.
 
-### Optional Inputs & Helpers
-- **TRV External Temperature Input:** `number` entity of TRV (e.g., `number.xxx_external_temperature_input`).
-- **TRV Temperature Accuracy:** `number` entity of TRV start threshold (e.g., `number.xxx_temperature_accuracy`).
-- **TRV Child Lock Switch:** `switch` entity for locking physical knob.
-- **Target Temperature UI Slider:** `input_number` helper mirroring target setpoint.
-- **Auto Mode Switch:** `input_boolean` helper (`ON` = follow schedule, `OFF` = manual).
-- **Manual Open Switch:** `input_boolean` helper to force valve 100 % open.
-- **Ignore Physical Rotation Switch:** `input_boolean` helper to ignore knob turns.
-- **Laundry Override Switch:** `input_boolean` helper (per room).
-- **Laundry Mode Temperature Offset:** `input_number` helper (`offset_laundry`).
-- **Global Laundry Drying Switch:** `input_boolean` helper (house-wide).
-- **Heating Master Switch:** `input_boolean` helper (`OFF` = Summer Mode).
-- **Heating Maintenance Switch:** `input_boolean` helper (`ON` = halt automation).
-- **Boiler State Switch:** `input_boolean` or `binary_sensor` representing boiler state.
-- **Boiler Boost Feature Switch:** `input_boolean` to enable/disable boiler boost.
-- **Boost Temp Difference Entity:** `input_number` threshold value for boost.
+### Priority 1: Window / Door Open
+- **Trigger:** Any configured window or door binary sensor (or group) turns **ON** and stays open longer than the configured `window_delay` (default: 30 seconds).
+- **Behavior:** Heating is immediately paused to prevent energy waste. 
+  - **Target Setpoint:** Set to `window_temp` (default: `5 °C`).
+  - **External Temperature:** Sent as the real room temperature so the TRV remains responsive.
+
+### Priority 2: Laundry Override Active
+- **Trigger:** Both the room's **Laundry override switch** (`laundry_override_enabled`) and the house-wide **Global laundry drying mode switch** (`laundry_mode_switch`) are **ON**.
+- **Behavior:** The room enters laundry drying mode.
+  - **Target Setpoint:** Set to the scheduled room setpoint plus the laundry offset (`schedule_sp + laundry_offset_val`, defaulting to `+1.0 °C` if no helper is provided).
+  - **External Temperature:** The actual room temperature sensor reading (`room_temp`) is fed to the TRV's external temperature input, allowing the TRV to natively modulate and regulate heat dynamically as clothes dry rather than overheating the room unconditionally.
+
+### Priority 3: Heating Master Switch OFF (Summer Mode)
+- **Trigger:** The house-wide `heating_master_switch` is turned **OFF** (representing Summer Mode).
+- **Behavior:** The system bifurcates based on whether global laundry drying is active:
+  - **If Global Laundry Switch is ON:** Non-laundry or standard rooms have their valves closed down to `window_temp` (`5 °C`).
+  - **If Global Laundry Switch is OFF:** All valves are forced **100% open** (using `fully_open_temp` and an artificially cold `fully_open_ext_temp` feed). This mechanical anti-sticking routine prevents radiator valves from seizing up during the summer months when heating is not actively in use.
+
+### Priority 4: Manual Open Switch ON
+- **Trigger:** The room's `manual_open_switch` helper is turned **ON**.
+- **Behavior:** Forces the radiator fully open on demand.
+  - **Target Setpoint:** Set to `fully_open_temp` (default: `35 °C`).
+  - **External Temperature:** Fed an artificially cold reading (`fully_open_ext_temp`, default: `15 °C`) so the TRV's internal logic forces the physical valve 100% open.
+
+### Priority 5: Auto Mode ON (Schedule & Boiler Boost)
+- **Trigger:** The `auto_mode_switch` is **ON** (or omitted, meaning auto mode is permanently enabled).
+- **Behavior:** The TRV follows automated schedules, with a built-in sub-scenario for **Boiler Boost**:
+  - **Standard Schedule:** The target setpoint mirrors the `room_setpoint_sensor` (driven by calendar schedules or template helpers).
+  - **Boiler Boost Active Sub-scenario:** If boiler boost is enabled, the central boiler is running, and the room temperature drops below the calculated threshold (`schedule_sp + desired_accuracy + boost_diff_val`), the TRV temporarily overrides the schedule and forces **100% open** (`fully_open_temp`) until the room temperature reaches the target setpoint (incorporating hysteresis).
+
+### Priority 6: Auto Mode OFF (Manual Target)
+- **Trigger:** The `auto_mode_switch` is **OFF**.
+- **Behavior:** The room operates in manual mode.
+  - **Target Setpoint:** Follows the manual target set via the dashboard UI target slider (`target_slider`) or directly via physical knob rotations.
 
 ---
 
-## 📜 License
+### Additional Underlying System Scenarios
 
-This project is licensed under the [MIT License](LICENSE).
+- **User Takeover (Knob or Slider Intervention):** If a user manually turns the physical TRV knob (while `ignore_rotation_switch` is OFF) or moves the UI slider while in Auto mode, the automation automatically switches the room mode from **Auto** to **Manual** (`auto_switch` turned OFF) and adopts the new target.
+- **Child Lock & Ignore Rotation Sync:** Bidirectionally syncs the TRV's physical child lock feature with the dashboard's `ignore_rotation_switch` to block unwanted manual adjustments.
+- **Hardware Keep-Alive:** Periodically (based on `keep_alive_interval`, e.g., every 10 minutes), the controller re-sends the external temperature to prevent the TRV from timing out its remote sensor (`remote_source_offline`, ~30 min timeout).
+
+---
+
+## 📦 Requirements & Prerequisites
+
+- **Home Assistant:** Version `2024.10.0` or newer.
+- **Integration:** Zigbee2MQTT (recommended for Sonoff TRVZB or equivalent TRVs supporting external temperature and start accuracy attributes/number entities).
+- **Optional Helpers:** Input numbers, input booleans, and binary sensors can be configured depending on which features you want to utilize. All optional inputs can be left empty to skip functionality.
+
+---
+
+## 🚀 Installation
+
+You can import this blueprint directly into your Home Assistant instance using the button below (once hosted on GitHub):
+
+[![Open your Home Assistant instance and show the blueprint import dialog](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=YOUR_GITHUB_RAW_URL_HERE/trv.yaml)
+
+### Manual Installation
+1. Copy the raw contents of `trv.yaml`.
+2. Save the file inside your Home Assistant configuration directory under:
+   `config/blueprints/automation/helryser/trv.yaml`
+3. Go to **Settings > Automations & Scenes > Blueprints** and click **Reload Blueprints**.
+
+---
+
+## ⚙️ Inputs Configuration Overview
+
+### 1. Room Entities
+- **Climate entity (TRV):** The physical radiator climate device.
+- **Room temperature sensor:** Reference temperature sensor fed to the TRV.
+- *Optional:* External temperature number entity, temperature accuracy number entity, child lock switch, and window/door binary sensors.
+
+### 2. Room Controls (Helpers)
+- *Optional:* Target temperature UI slider (`input_number`), start offset entity, auto mode switch, manual open switch, ignore physical rotation switch, laundry override boolean, laundry mode temperature offset entity (`offset_laundry`), and boiler boost configuration entities.
+
+### 3. Global System Entities
+- *Optional:* House-wide heating master switch, maintenance switch, and laundry drying mode switch.
+
+### 4. Tuning & Offsets
+- Adjust parameters like the valve "fully open" temperature, artificial cold external temperature for forced opening, window temperature fallback, window open delay, trigger debounce duration, and the hardware keep-alive interval.
+
+---
+
+## 📄 License
+
+This project is open-source and available under the terms of the [MIT License](LICENSE).
