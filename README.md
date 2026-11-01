@@ -1,6 +1,5 @@
 # Advanced Single-Room TRV Controller (Home Assistant Blueprint)
 
-[![GitHub Release](https://img.shields.io/github/v/release/pof42428/Advanced-TRV?style=flat-square&color=blue)](https://github.com/pof42428/Advanced-TRV/releases)
 [![Home Assistant Blueprint](https://img.shields.io/badge/Home%20Assistant-Blueprint-blue?logo=homeassistant&style=flat-square)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fpof42428%2FAdvanced-TRV%2Fblob%2Fmain%2Ftrv.yaml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
