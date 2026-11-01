@@ -4,7 +4,7 @@
 # Control priority (highest first):
 # 0. Maintenance switch ON -> automation halted (root condition)
 # 1. Window / door open -> heating paused (TRV dropped to 5 °C)
-# 2. Laundry override active -> valve forced 100 % open
+# 2. Laundry override active -> valve set to schedule + laundry offset
 # 3. Heating master switch OFF:
 #      - If Laundry switch is ON: non-laundry valves closed (5 °C)
 #      - If Laundry switch is OFF: all valves forced 100 % open (prevent sticking)
@@ -24,7 +24,7 @@
 ################################################################################
 blueprint:
   name: Advanced TRV room controller
-  author: pof42428
+  author: helryser
   description: >
     Production-grade controller for a single room with a Thermostatic Radiator
     Valve that supports an **external temperature input** and a **temperature
@@ -45,7 +45,7 @@ blueprint:
     child lock is kept in sync with this switch (bidirectionally).
 
     - Global *master switch* (summer mode → idle open / active close), *maintenance
-    switch* (automation halted) and *laundry drying* override.
+    switch* (automation halted) and *laundry drying* override with custom offset.
 
     - Window / door sensors pause heating after a configurable delay.
 
@@ -196,13 +196,23 @@ blueprint:
           name: Laundry override switch (optional)
           description: >
             Optional input_boolean helper. Allow the global laundry drying switch
-            to force this room's radiator fully open if this switch is ON.
+            to boost this room's radiator if this switch is ON.
             If omitted, defaults to false.
           default: []
           selector:
             entity:
               filter:
                 - domain: input_boolean
+        offset_laundry:
+          name: Laundry mode temperature offset (optional)
+          description: >
+            Input number helper specifying how many degrees above the schedule
+            setpoint the TRV should target during laundry mode. Defaults to 1 °C.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: input_number
         boiler_boost_switch:
           name: Boiler boost feature switch (optional)
           description: Enable/disable the boiler boost feature in auto mode.
@@ -379,6 +389,11 @@ triggers:
     for: !input trigger_debounce
     id: start_offset
   - trigger: state
+    entity_id: !input offset_laundry
+    not_to: [unavailable, unknown]
+    for: !input trigger_debounce
+    id: laundry_offset
+  - trigger: state
     entity_id: !input trv_climate
     attribute: temperature
     for: !input trigger_debounce
@@ -463,6 +478,7 @@ variables:
   window_input: !input window_sensors
   target_slider: !input target_slider
   start_offset_entity: !input start_offset_entity
+  offset_laundry_entity: !input offset_laundry
   auto_switch: !input auto_mode_switch
   manual_open_switch: !input manual_open_switch
   ignore_switch: !input ignore_rotation_switch
@@ -498,6 +514,7 @@ variables:
   has_child_lock: "{{ child_lock_switch is string and child_lock_switch | length > 0 }}"
   has_slider: "{{ target_slider is string and target_slider | length > 0 }}"
   has_offset_entity: "{{ start_offset_entity is string and start_offset_entity | length > 0 }}"
+  has_offset_laundry: "{{ offset_laundry_entity is string and offset_laundry_entity | length > 0 }}"
   has_auto: "{{ auto_switch is string and auto_switch | length > 0 }}"
   has_manual_open: "{{ manual_open_switch is string and manual_open_switch | length > 0 }}"
   has_ignore: "{{ ignore_switch is string and ignore_switch | length > 0 }}"
@@ -542,6 +559,7 @@ variables:
   slider_max: "{{ state_attr(target_slider, 'max') | float(100) if has_slider else 100 }}"
   ext_current: "{{ states(ext_temp_number) | float(none) if has_ext else none }}"
   accuracy_current: "{{ states(accuracy_number) | float(none) if has_accuracy else none }}"
+  laundry_offset_val: "{{ states(offset_laundry_entity) | float(1.0) if has_offset_laundry else 1.0 }}"
   trv_state: "{{ states(trv) }}"
   trv_target: "{{ state_attr(trv, 'temperature') | float(none) }}"
   trv_min: "{{ state_attr(trv, 'min_temp') | float(5) }}"
@@ -588,8 +606,11 @@ variables:
 
   # ---- Desired TRV setpoint --------------------------------------------------
   desired_target: >-
-    {%- if control_mode in ['manual_open', 'laundry', 'summer_open'] -%}
+    {%- set base_sp = schedule_sp if schedule_sp is number else (slider_val if slider_val is number else (trv_target if trv_target is number else 20)) -%}
+    {%- if control_mode in ['manual_open', 'summer_open'] -%}
       {%- set t = fully_open_temp -%}
+    {%- elif control_mode == 'laundry' -%}
+      {%- set t = base_sp + laundry_offset_val -%}
     {%- elif control_mode in ['summer_closed', 'window'] -%}
       {%- set t = window_temp -%}
     {%- elif control_mode == 'auto' -%}
@@ -613,7 +634,7 @@ variables:
 
   # ---- Desired external temperature ------------------------------------------
   desired_ext: >-
-    {%- set v = fully_open_ext_temp if (control_mode in ['manual_open', 'laundry', 'summer_open'] or (control_mode == 'auto' and boiler_boost_active | bool(false))) else room_temp -%}
+    {%- set v = fully_open_ext_temp if (control_mode in ['manual_open', 'summer_open'] or (control_mode == 'auto' and boiler_boost_active | bool(false))) else room_temp -%}
     {{ v | round(1) if v is number else none }}
 
   # ---- Slider value mirroring ------------------------------------------------
