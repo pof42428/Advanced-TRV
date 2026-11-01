@@ -61,6 +61,17 @@ The controller evaluates states based on the following priority hierarchy (highe
 - **Behavior:** The system bifurcates based on whether global laundry drying is active:
   - **If Global Laundry Switch is ON:** Non-laundry or standard rooms have their valves closed down to `window_temp` (`5 °C`).
   - **If Global Laundry Switch is OFF:** All valves are forced **100% open** (using `fully_open_temp` and an artificially cold `fully_open_ext_temp` feed). This mechanical anti-sticking routine prevents radiator valves from seizing up during the summer months when heating is not actively in use.
+1. **Saturday 10:00 AM Trigger:** A time-based trigger (`id: summer_exercise`) that fires every Saturday at 10:00 AM.
+2. **Optimal Cycle Count ($x = 3$):** Running **3 full cycles** (Close $\rightarrow$ Wait 1 min $\rightarrow$ Open $\rightarrow$ Wait 1 min) is optimal. It effectively clears limescale deposits on the valve pin while protecting battery life and preventing motor wear.
+3. **Automated Maintenance Loop:** Added step `8` in the actions section to execute the 3-cycle sequence automatically without disturbing normal operations when summer mode is inactive.
+
+---
+
+<ElicitationsGroup message="If you want to customize the exercise routine:">
+  <Elicitation label="Change exercise day/time" query="How can I change the summer exercise schedule from Saturday 10 am to a different day or time?" />
+  <Elicitation label="Adjust loop count (x)" query="How can I add an input_number helper to make the number of exercise cycles (x) configurable from the UI?" />
+  <Elicitation label="Change wait delay" query="How do I change the 1-minute wait duration between open and close actions?" />
+</ElicitationsGroup>
 
 ### Priority 4: Manual Open Switch ON
 - **Trigger:** The room's `manual_open_switch` helper is turned **ON**.
