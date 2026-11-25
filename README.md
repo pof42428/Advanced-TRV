@@ -112,7 +112,7 @@ The controller evaluates states based on the following priority hierarchy (highe
 
 You can import this blueprint directly into your Home Assistant instance using the button below:
 
-[![Open your Home Assistant instance and show the blueprint import dialog](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=[[YOUR_GITHUB_RAW_URL_HERE/trv.yaml](https://github.com/pof42428/Advanced-TRV/blob/main/trv.yaml)](https://github.com/pof42428/Advanced-TRV/blob/main/trv.yaml))
+[![Open your Home Assistant instance and show the blueprint import dialog](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fpof42428%2FAdvanced-TRV%2Fblob%2Fmain%2Ftrv.yaml)
 
 ### Manual Installation
 1. Copy the raw contents of `trv.yaml`.
