@@ -118,7 +118,7 @@ You can import this blueprint directly into your Home Assistant instance using t
 1. Copy the raw contents of `trv.yaml`.
 2. Save the file inside your Home Assistant configuration directory under:
    `config/blueprints/automation/pof42428/trv.yaml`
-3. Go to **Settings > Automations & Scenes > Blueprints** and click **Reload Blueprints**.
+3. Go to **Settings > Tools** and click **Automations**.
 
 ---
 
